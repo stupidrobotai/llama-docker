@@ -1,0 +1,132 @@
+version: '3'
+
+services:
+  base_image:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.base
+  cuda_image:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.cuda
+
+  webui:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.webui
+    env_file: 
+      - .env
+    restart: unless-stopped
+    ports:
+      - ${WEBUI_EXTERNAL_PORT}:8000
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - BASE_URL=${OPENAI_BASE_URL}
+      - API_KEY=${OPENAI_API_KEY}
+    links:
+      - mariadb
+      - mongo
+      - redis
+      - llama_cpp_python
+      - stable_diffusion
+    volumes:
+      - ${WEBUI_DIRECTORY}:${INTERNAL_APP_DIRECTORY}
+    depends_on:
+      - mariadb
+      - mongo
+      - redis
+      - llama_cpp_python
+      - stable_diffusion
+    command: uvicorn --host 0.0.0.0 --port 8000 app:app
+
+  llama_cpp_python:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.llama_cpp_python
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, compute, utility]
+    restart: unless-stopped
+    ports:
+      - ${LLAMA_EXTERNAL_PORT}:8080
+    volumes:
+      - ${LLAMA_DIRECTORY}:${INTERNAL_APP_DIRECTORY}
+      - ${MODEL_DIRECTORY}:/models
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    command: python3 -m llama_cpp.server --config_file llama_config.json
+
+  stable_diffusion:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.stable_diffusion
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, compute, utility]
+    restart: unless-stopped
+    ports:
+      - ${SD_EXTERNAL_PORT}:8000
+    volumes:
+      - ${SD_DIRECTORY}:${INTERNAL_APP_DIRECTORY}
+      - ${SD_IMAGE_DIRECTORY}:${INTERNAL_SD_IMAGE_DIRECTORY}
+      - ${MODEL_DIRECTORY}:${INTERNAL_SD_MODEL_DIRECTORY}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    command: uvicorn --host 0.0.0.0 --port 8000 app:app
+
+  mariadb:
+    image: mariadb
+    restart: unless-stopped
+    volumes:
+      - ${MARIADB_DIRECTORY}:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: $MYSQL_ROOT_PASSWORD
+      MYSQL_USER: $MYSQL_USER
+      MYSQL_PASSWORD: $MYSQL_PASSWORD
+      MYSQL_DATABASE: mariadb-example
+    ports:
+      - ${MARIADB_EXTERNAL_PORT}:3306
+
+  mongo:
+    image: mongo
+    restart: unless-stopped
+    ports:
+      - ${MONGO_EXTERNAL_PORT}:27017
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: $MONGO_INITDB_ROOT_USERNAME
+      MONGO_INITDB_ROOT_PASSWORD: $MONGO_INITDB_ROOT_PASSWORD
+      MONGO_INITDB_DATABASE: $MONGO_INITDB_DATABASE
+    volumes:
+      - ${MONGO_DIRECTORY}:/data/db
+
+  redis:
+    image: redis
+    restart: unless-stopped
+    command: redis-server --requirepass $REDIS_PASSWORD
+    ports:
+      - ${REDIS_EXTERNAL_PORT}:6379
+    volumes:
+      - ${REDIS_DIRECTORY}:/data
+
+  grafana:
+    image: grafana/grafana-oss
+    restart: unless-stopped
+    environment:
+     - GF_INSTALL_PLUGINS=grafana-clock-panel
+    ports:
+     - ${GRAFANA_EXTERNAL_PORT}:3000
+    user: '0'
+    volumes:
+     - ${GRAFANA_DIRECTORY}:/var/lib/grafana

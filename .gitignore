@@ -1,0 +1,11 @@
+.vscode/
+
+env/
+__pycache__/
+
+mongo/
+mariadb/
+mysql/
+redis/
+qdrant/
+grafana/
